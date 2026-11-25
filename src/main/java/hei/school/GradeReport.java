@@ -6,6 +6,7 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,7 +64,12 @@ public class GradeReport {
                 } else {
                     BigDecimal raw = (BigDecimal) row.get("raw_points");
                     BigDecimal max = (BigDecimal) row.get("max_points");
-                    BigDecimal grade = raw.multiply(new BigDecimal("20")).divide(max, 1, RoundingMode.HALF_UP);
+                    // late penalty: -10% per started day late, capped at -50%
+                    long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedAt.toLocalDate()));
+                    long penaltyPercent = Math.min(daysLate * 10, 50);
+                    BigDecimal grade = raw.multiply(BigDecimal.valueOf(20 * (100 - penaltyPercent)))
+                            .divide(max.multiply(BigDecimal.valueOf(100)), 1, RoundingMode.HALF_UP)
+                            .max(BigDecimal.ZERO);
                     line.put("status", "CORRIGÉ");
                     line.put("grade", grade);
                     line.put("feedback", row.get("feedback"));

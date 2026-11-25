@@ -1,9 +1,11 @@
 package hei.school;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -96,10 +98,17 @@ public class SubmissionController {
         result.put("submittedAt", submittedAt);
         result.put("late", submittedAt.toLocalDate().isAfter(deadline));
         if (row.get("raw_points") != null) {
-            double raw = ((BigDecimal) row.get("raw_points")).doubleValue();
-            double max = ((BigDecimal) row.get("max_points")).doubleValue();
-            result.put("rawPoints", raw);
-            result.put("grade", Math.round(raw / max * 20 * 10) / 10.0);
+            BigDecimal raw = (BigDecimal) row.get("raw_points");
+            BigDecimal max = (BigDecimal) row.get("max_points");
+            // late penalty: -10% per started day late, capped at -50%
+            long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedAt.toLocalDate()));
+            long penaltyPercent = Math.min(daysLate * 10, 50);
+            BigDecimal grade = raw.multiply(BigDecimal.valueOf(20 * (100 - penaltyPercent)))
+                    .divide(max.multiply(BigDecimal.valueOf(100)), 1, RoundingMode.HALF_UP)
+                    .max(BigDecimal.ZERO);
+            result.put("rawPoints", raw.doubleValue());
+            result.put("grade", grade.doubleValue());
+            result.put("latePenaltyPercent", penaltyPercent);
             result.put("feedback", row.get("feedback"));
         }
         return ResponseEntity.ok(result);
@@ -130,12 +139,17 @@ public class SubmissionController {
         jdbcTemplate.update("UPDATE submission SET raw_points = ?, feedback = ?, graded_at = now() WHERE id = ?",
                 points, feedback, id);
 
-        // grade out of 20
-        double grade = Math.round(points / max * 20 * 10) / 10.0;
-
         LocalDate deadline = ((java.sql.Date) row.get("deadline")).toLocalDate();
         LocalDateTime submittedAt = ((Timestamp) row.get("submitted_at")).toLocalDateTime();
         boolean late = submittedAt.toLocalDate().isAfter(deadline);
+
+        // grade out of 20, with late penalty: -10% per started day late, capped at -50%
+        long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedAt.toLocalDate()));
+        long penaltyPercent = Math.min(daysLate * 10, 50);
+        double grade = BigDecimal.valueOf(points).multiply(BigDecimal.valueOf(20 * (100 - penaltyPercent)))
+                .divide(((BigDecimal) row.get("max_points")).multiply(BigDecimal.valueOf(100)), 1, RoundingMode.HALF_UP)
+                .max(BigDecimal.ZERO)
+                .doubleValue();
 
         // notify the student by email
         String fullName = (String) row.get("full_name");
@@ -147,6 +161,10 @@ public class SubmissionController {
         message.setSubject("Kilasy : nouvelle note pour " + title);
         String text = "Bonjour " + firstName + ",\n\n"
                 + "Ta note pour « " + title + " » est disponible : " + grade + "/20.\n";
+        if (penaltyPercent > 0) {
+            text += "(Pénalité de retard : −" + penaltyPercent + " %, soit " + daysLate
+                    + (daysLate > 1 ? " jours" : " jour") + " de retard.)\n";
+        }
         if (feedback != null && !feedback.isBlank()) {
             text += "\nCommentaire de l'enseignant : " + feedback + "\n";
         }
@@ -160,6 +178,7 @@ public class SubmissionController {
         result.put("rawPoints", points);
         result.put("maxPoints", max);
         result.put("grade", grade);
+        result.put("latePenaltyPercent", penaltyPercent);
         result.put("late", late);
         result.put("feedback", feedback);
         return ResponseEntity.ok(result);
