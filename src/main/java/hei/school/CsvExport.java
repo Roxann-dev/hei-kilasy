@@ -39,10 +39,11 @@ public class CsvExport {
             if (row.get("raw_points") != null) {
                 BigDecimal raw = (BigDecimal) row.get("raw_points");
                 BigDecimal max = (BigDecimal) row.get("max_points");
-                LocalDate deadline = ((Date) row.get("deadline")).toLocalDate();
+                Date deadlineDate = (Date) row.get("deadline");
+                LocalDate deadline = deadlineDate == null ? null : deadlineDate.toLocalDate();
                 LocalDate submittedOn = ((Timestamp) row.get("submitted_at")).toLocalDateTime().toLocalDate();
-                // late penalty: -10% per started day late, capped at -50%
-                long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedOn));
+                // late penalty: -10% per started day late, capped at -50% (none without a deadline)
+                long daysLate = deadline == null ? 0 : Math.max(0, ChronoUnit.DAYS.between(deadline, submittedOn));
                 long penaltyPercent = Math.min(daysLate * 10, 50);
                 BigDecimal grade = raw.multiply(BigDecimal.valueOf(20 * (100 - penaltyPercent)))
                         .divide(max.multiply(BigDecimal.valueOf(100)), 1, RoundingMode.HALF_UP)
@@ -54,7 +55,7 @@ public class CsvExport {
                     .append(row.get("email")).append(';')
                     .append(row.get("cohort")).append(';')
                     .append(row.get("title")).append(';')
-                    .append(row.get("deadline")).append(';')
+                    .append(row.get("deadline") == null ? "" : row.get("deadline")).append(';')
                     .append(row.get("submitted_at")).append(';')
                     .append(Boolean.TRUE.equals(row.get("late")) ? "oui" : "non").append(';')
                     .append(note).append('\n');

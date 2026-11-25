@@ -35,6 +35,7 @@ The API responds on http://localhost:8080.
 | GET | `/exercises` | List exercises |
 | GET | `/exercises/{id}` | Exercise details |
 | POST | `/exercises` | Create an exercise (teacher) |
+| POST | `/exercises/{id}/start` | Start the countdown of a timed exercise (student) |
 | POST | `/exercises/{id}/submissions` | Submit an exercise (student) |
 | GET | `/submissions/{id}` | Submission details |
 | PUT | `/submissions/{id}/grade` | Grade a submission (teacher) |
@@ -52,6 +53,18 @@ Create an exercise:
 curl -X POST http://localhost:8080/exercises \
   -H "Content-Type: application/json" \
   -d '{"title": "Recherche dichotomique", "maxPoints": 20, "deadline": "2027-03-01", "teacherId": 1}'
+```
+
+Create a timed exercise (30 minutes, no deadline), then start it as a student:
+
+```bash
+curl -X POST http://localhost:8080/exercises \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Quiz Java", "durationMinutes": 30, "teacherId": 1}'
+
+curl -X POST http://localhost:8080/exercises/6/start \
+  -H "Content-Type: application/json" \
+  -d '{"studentId": 1}'
 ```
 
 Submit an exercise:
@@ -83,3 +96,7 @@ curl http://localhost:8080/exports/grades.csv
 - A student can only submit once per exercise.
 - A submission sent after the deadline day is marked as late.
 - Points are entered on the exercise's scale (10, 20, 40…) and converted to a grade out of 20.
+- An exercise has a deadline, a duration in minutes (timed exercise), or both.
+- A timed exercise must be started (`POST /exercises/{id}/start`) before submitting. The countdown starts at that moment and never restarts: a second call returns the existing start.
+- A submission sent after the end of the duration is refused (HTTP 422). A submission to a timed exercise that was not started is refused (HTTP 400).
+- The transcript shows the time used by the student on each timed exercise.
