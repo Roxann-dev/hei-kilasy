@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import hei.school.KilasyApplication.SmsSender;
+
 @RestController
 public class SubmissionController {
 
@@ -30,6 +32,9 @@ public class SubmissionController {
 
     @Autowired
     private JavaMailSender mailSender;
+
+    @Autowired
+    private SmsSender smsSender;
 
     @PostMapping("/exercises/{id}/submissions")
     public ResponseEntity<?> submit(@PathVariable long id, @RequestBody Map<String, Object> body) {
@@ -173,6 +178,22 @@ public class SubmissionController {
         mailSender.send(message);
         System.out.println("Email de note envoyé à " + row.get("email"));
 
+        // notify the student by SMS; a failure must not cancel the published grade
+        String phone = (String) row.get("phone");
+        boolean smsSent = false;
+        if (phone == null || phone.isBlank()) {
+            System.out.println("SMS non envoyé : pas de numéro pour " + fullName);
+        } else {
+            String sms = "Votre note pour « " + title + " » est disponible : "
+                    + String.valueOf(grade).replace('.', ',') + "/20.";
+            try {
+                smsSender.send(phone, sms);
+                smsSent = true;
+            } catch (Exception ex) {
+                System.err.println("Échec de l'envoi du SMS à " + phone + " : " + ex.getMessage());
+            }
+        }
+
         Map<String, Object> result = new HashMap<>();
         result.put("id", id);
         result.put("rawPoints", points);
@@ -181,6 +202,7 @@ public class SubmissionController {
         result.put("latePenaltyPercent", penaltyPercent);
         result.put("late", late);
         result.put("feedback", feedback);
+        result.put("smsSent", smsSent);
         return ResponseEntity.ok(result);
     }
 }

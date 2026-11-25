@@ -134,3 +134,107 @@ Une règle simple (« −10 % par jour ») m'a obligé à modifier **4 endroits*
 dans **3 fichiers**, et l'un d'eux était déjà faux. Si le client change
 la règle, il faudra penser à modifier les 4 endroits, sinon les notes ne
 seront plus les mêmes partout.
+
+---
+
+## C2 — Notification par SMS
+
+> **Demande du client :** quand une note est publiée, l'étudiant reçoit
+> aussi un SMS (simulé dans les logs) au numéro de son profil.
+
+### En résumé
+
+| | |
+|---|---|
+| **Fichiers modifiés** | `KilasyApplication.java`, `SubmissionController.java` |
+| **Fichiers créés** | aucun |
+| **Ajouts** | interface `SmsSender` + simulation dans les logs, champ `smsSent` dans le JSON |
+| **Problème existant repéré (non corrigé)** | une panne de l'email renvoie un 500 alors que la note est déjà enregistrée |
+
+---
+
+### Échange 1 · Analyse du code
+
+**Proposition :** l'IA a vérifié que C1 était bien poussé, puis a relevé :
+- le numéro de téléphone est déjà lu par la requête de `grade()`, mais
+  il ne servait à rien jusqu'ici ;
+- la note est enregistrée en base **avant** l'envoi de l'email : si le
+  SMS lève une exception sans qu'on l'attrape, l'API renvoie 500 alors
+  que la note est publiée ;
+- l'exemple du client écrit `14,4/20` (virgule), alors que l'email écrit
+  `14.4/20`.
+
+**Décision :** gardé. Le SMS suit le format du client, et l'email ne
+change pas.
+
+---
+
+### Échange 2 · Un conflit entre la demande et la consigne
+
+Le 3ᵉ critère (« changer de fournisseur sans modifier le code de la
+notation ») demande de séparer l'envoi du SMS de la notation. Mais la
+consigne du module interdit de créer des fichiers.
+
+| Option proposée | Critère 3 | Consigne | Mon choix |
+|---|---|---|---|
+| `println` directement dans `grade()` | ✘ | ✔ | |
+| Nouveaux fichiers `SmsSender.java` + `LogSmsSender.java` | ✔ | ✘ | |
+| Interface + `@Bean` dans `KilasyApplication.java` | ✔ | ✔ | **✔** |
+
+**Pourquoi :** c'est la seule option qui respecte les deux à la fois.
+`SubmissionController` ne connaît que l'interface `SmsSender`. Le jour
+où le client choisira un fournisseur, on changera seulement le `@Bean`.
+
+---
+
+### Échange 3 · Plan et comportement en cas d'échec
+
+**Proposition :** l'envoi du SMS se fait dans un `try/catch` : en cas
+d'échec, on l'écrit dans les logs et on renvoie quand même 200. Pour un
+étudiant sans numéro, on n'envoie rien et on l'écrit dans les logs.
+
+**Décision :** validé, avec le champ `smsSent` dans la réponse JSON.
+
+**Pourquoi :** sans ce champ, l'enseignant ne peut pas savoir que le SMS
+n'est pas parti.
+
+**Refusé (hors sujet) :** corriger le 500 en cas de panne de l'email.
+Le problème existait déjà et le client ne l'a pas demandé.
+
+---
+
+### Échange 4 · Test de panne
+
+| Proposition | Mon choix | Pourquoi |
+|---|---|---|
+| Ajouter un `throw` temporaire, puis le retirer | **✔** | le code livré reste propre, et c'est ce que suggère l'énoncé |
+| Une option de configuration `kilasy.sms.fail` | | du code qui ne sert qu'aux tests resterait en production |
+
+---
+
+### Échange 5 · Codage et vérification
+
+**Ce que l'IA a fait :** codé, compilé, remis la base à zéro, puis
+lancé les tests.
+
+| Test | Résultat |
+|---|---|
+| Noter Bob (10/10) | email reçu + `[SMS] +261 34 00 000 02 : Votre note pour « Pile et file » est disponible : 18,0/20.` |
+| **Panne simulée**, noter Felix (30/40) | réponse 200, `smsSent: false`, erreur écrite dans les logs, **note 15,0 bien publiée** (détail + CSV), email reçu |
+| `throw` retiré | absent du `git diff`, le SMS repart normalement |
+| Étudiant sans numéro | 200, `smsSent: false`, « pas de numéro » dans les logs |
+| Non-régression C1 | Bob, soumission 2 : toujours 14,4 |
+
+**Ma vérification :** j'ai comparé ces résultats au tableau attendu,
+fixé avant le codage. Les trois critères sont respectés.
+
+---
+
+### Ce que je retiens
+
+Le 3ᵉ critère m'a obligé à séparer **ce qu'on fait** (prévenir
+l'étudiant) de **comment on le fait** (quel fournisseur). Avec la
+consigne « pas de nouveau fichier », j'ai dû mettre l'interface dans
+`KilasyApplication.java`, ce qui n'est pas sa place naturelle. Ça
+montre la limite : sans pouvoir réorganiser le code, chaque nouvelle
+dépendance externe finit dans un endroit qui n'est pas fait pour elle.
